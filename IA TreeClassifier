@@ -1,0 +1,627 @@
+import pandas as pd
+import os
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn import preprocessing
+import pickle
+import plotly.express as px
+import plotly.io as pio
+from sklearn.metrics import confusion_matrix
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+
+
+
+
+
+    
+# Print iterations progress
+def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+    # Print New Line on Complete
+    if iteration == total: 
+        print()
+
+def extract(data,period,offset=0):
+    """
+
+    Parameters
+    ----------
+    data : numpy.array
+        Contains the array with all the data
+    period : int
+        Period of extracted data
+    offset : TYPE, optional
+        DESCRIPTION. The default is 0.
+        Allows to begin with an offset to create other database
+
+    Returns
+    -------
+    data_reduce : numpy.array
+        contains an array with data extracted from data, there are period-less values
+
+    """
+    data_reduce = data[0,:]
+    data_reduce = np.reshape(data_reduce, (1,np.product(data_reduce.shape)))
+    print("\n Processing data reduction by the factor ="+str(period)+"\n")
+    for i in range(1+offset,len(data),period):
+        printProgressBar(i/period, len(data)/period,prefix='Progress:',suffix='Complete',length=50)
+        a = data[i,:]
+        vect1 = np.reshape(a, (1,np.product(a.shape)))
+        data_reduce = np.concatenate((data_reduce,vect1),axis=0)
+    
+    return data_reduce  
+
+
+def import_data(PATH,FOLDERS):
+    
+    """
+    Import all the .tsv data and concatenate them in an array and a Dataframe
+    Data = contains all the values of .tsv without the labels
+    Labels = contains all the column labels
+    dataframe = contains the dataframe type of all .tsv
+    (ie used for the .describe)
+    
+    @params:
+        PATH : Path the folder data (allows to separate project datas (ie planktonscope/flowscope))
+        FOLDERS : all folders containing the .tsv (every species has a .tsv)
+    """
+    data = np.zeros((1,160))
+    
+    i=0
+    for folder in FOLDERS :
+        #PATH CALCUL
+        file = os.listdir(PATH+'/'+folder)
+        #print("Reading file :"+str(file)+" file number :"+str(i))
+        i=i+1
+        FILE = PATH+'/'+folder+'/'+file[0]
+        
+        #Open file
+        data_temp = pd.read_csv(FILE, sep='\t', low_memory = False)
+        if(i==1):
+            dataframetotal = data_temp
+            labels = data_temp.columns.tolist()
+        else:
+            dataframetotal = pd.concat([dataframetotal,data_temp])
+        #Extract data
+        data_temp_np = data_temp.to_numpy()
+        #REMOVE ['f'] or ['t'] tags on the first row
+        data_temp_np_clear = np.delete(data_temp_np,0,0)
+        
+        #add to the global dataset
+        data = np.concatenate((data,data_temp_np_clear),axis=0)
+        #delete the first line of 0
+        data = np.delete(data,0,0)
+        #Extract labels
+        
+        printProgressBar(i, len(FOLDERS),prefix='Progress:',suffix='Complete',length=50)
+    
+    return data,labels,dataframetotal
+  
+def data_stats(dataframe):
+    """
+    Give a table of statistic about our data
+    Used to chose features and explains data
+    """
+    return dataframe.describe()
+
+def save_obj(obj, name ):
+    """
+    Parameters
+    ----------
+    obj : any data
+        Insert the array or tab to save
+        Used to not recreate it on each run
+    name : str
+        String of the name 
+    Returns
+        1 if ok
+    """
+    with open(name + '.pkl', 'wb') as f:
+        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+    return 1
+
+
+def load_obj(name ):
+    """
+    Parameters
+    ----------
+    name: string
+        Name of the file
+    Returns
+        1 if ok
+
+    """
+    with open(name + '.pkl', 'rb') as f:
+        return pickle.load(f)
+    return 1
+    
+    
+def ACP_ALD(data, labels,species):
+    """
+    Parameters
+    ----------
+    data : array
+        Array of data used
+    labels : String
+        Features name
+    species : String
+        Name of species of each data
+    Returns
+    -------
+    Plot of acp 
+
+    """
+    acp = PCA()
+    scaler = preprocessing.StandardScaler()
+    z=scaler.fit_transform(data)
+    coord = acp.fit_transform(z)
+    fig = px.scatter_matrix(
+        coord,
+        labels=labels,
+        dimensions=range(2),
+        color = species
+    )
+    variance = acp.explained_variance_ratio_
+    variance_abs = (variance*100)
+    #print(variance_abs)
+
+    fig.update_traces(diagonal_visible=False)
+    fig.show()
+    fig = px.scatter(coord[:,6],coord[:,21],color = species)
+    fig.show()
+
+def feature_extract(data,labels,labels_to_extract):
+    """
+    Parameters
+    ----------
+    data : array
+        All the data of ecotaxa
+    labels : Array of string
+        Array with all the labels of data
+    labels_to_extract : Array of string
+        Array with a labels subdivision
+    Returns
+    -------
+    features : Array
+        Array with the features about labels_to_extract
+    """
+    print("\n= Extracting features with given labels for the train =")
+    features = np.zeros((len(data),len(labels_to_extract)))
+    compt = 0
+    try :
+        for element in labels_to_extract:
+            features[:,compt] = data[:,labels.index(element)]
+            compt = compt+1
+        
+    except ValueError:
+        print("\n"+str(element) + " is not a valid label, please check")
+        
+    return features
+
+
+def remove_nan(data,id_,specie):
+    """
+    Remove object with at least one "nan" on its features
+    Parameters
+    ----------
+    data : Array
+        Contains features
+    id_ : String
+        measure's name
+    specie : String
+        Species of the measure
+    Returns
+    -------
+    data : Array
+        Contains features
+    id_ : String
+        Measure's name
+    specie : String
+        Species of the measure
+    """
+    i = 0
+    j = 0
+    lines = []
+    for i in range(0,np.shape(data)[0]):
+        for j in range(0,np.shape(data)[1]):
+            if(str(data[i][j]) == "nan"):
+                lines.append(i)
+                pass
+    data = np.delete(data,lines,0)
+    id_ = np.delete(id_,lines,0)
+    specie = np.delete(specie,lines,0)
+    
+    return data,id_,specie
+
+def matrice_confusion(test_target,predicted,label):
+    """
+    Parameters
+    ----------
+    test_target : String
+        True species
+    predicted : String
+        Predicted species by the model
+    label : String
+        Labels of species
+    Returns
+    -------
+    MC : Array
+        contain the confusion matrix
+
+    """
+    MC= confusion_matrix(test_target,predicted,labels=label)
+    return MC
+    
+
+
+
+def foret_aleatoire(critere, profondeur,nb_arbre, nb_features,train, train_labels, test):
+    """
+    Parameters
+    ----------
+    critere : 'gini' or 'entropy'
+    profondeur : Number of layers kept
+    nb_arbre : tree number in the forest
+    nb_features : Number of feature
+    train : Train data base
+    train_target : Train labels
+    test : Test data base
+    Returns
+    -------
+    forest : Model
+        forest model 
+    predicted : Array of string
+        Contains species predicted
+    chemin : Array
+        Contains path of prediction
+    """
+    forest = RandomForestClassifier(criterion=critere,max_depth=profondeur,n_estimators=nb_arbre,max_features=nb_features, random_state=None)
+    forest.fit(train, train_labels)
+    
+    #predicted = forest.predict(test)
+    
+    #chemin=forest.decision_path(train)
+    return forest
+
+def label_extract(liste):
+    """
+    Create an array with all species used
+    Used to delete occurences of species
+    Parameters
+    ----------
+    liste : array
+        Contains of the species name
+    Returns
+    -------
+    outpute : Array
+        Contains all the species 
+    """
+    inpute = liste.copy()
+    outpute = []
+    for i in inpute: 
+        if i not in outpute: 
+            outpute.append(i)
+    return outpute
+
+
+def display_prediction_rate(values):
+    """
+    Parameters
+    ----------
+    values : Array
+        Array with prediction rate
+    Returns
+    -------
+    """
+    for i in range(0,len(values[0])):
+        print("Specie : "+str(values[0][i])+str(" | Rate : ")+str(values[1][i])+str("%"))
+        
+def save_model(model):
+    """
+    Save the model
+    Parameters
+    ----------
+    model : Model
+    Returns
+    -------
+    str
+        DESCRIPTION.
+    """
+    joblib.dump(model,"./random_forest_exported",3)
+    return 'Model Save done'
+
+def load_model():
+    """
+    Returns
+    -------
+    model : model
+    """
+    model = joblib.load("./random_forest_exported")
+    return model
+
+
+def extract_data(PATH,FOLDERS):
+    """
+    Parameters
+    ----------
+    PATH : String
+        Path of ecotaxa data
+    FOLDERS : TYPE
+        Folders containing csv sheets
+    Returns
+    -------
+    data : Array
+        All the data
+    labels : Array of string
+        name of features
+    dataframe : Data struct
+        All the data 
+    data_train : Array
+        Data used to create the model
+    data_test : Array
+        Data used to test the model
+    """
+    
+    print("= importing all data base =")
+    data,labels,dataframe = import_data(PATH,FOLDERS)
+    print("= Data train extraction =")
+    data_train = extract(data,100)
+    print("= Data test extraction =")
+    data_test = extract(data,100,1)
+    return data,labels,dataframe,data_train,data_test
+
+def save_data(data,labels,dataframe,data_train,data_test):
+    """
+    Parameters
+    ----------
+    data : Array
+        All the data
+    labels : Array of string
+        name of features
+    dataframe : Data struct
+        All the data 
+    data_train : Array
+        Data used to create the model
+    data_test : Array
+        Data used to test the model
+    """
+    save_obj(data, "data")
+    save_obj(labels, "labels")
+    save_obj(dataframe, "dataframe")
+    save_obj(data_train, "data_train")
+    save_obj(data_test, "data_test")
+    return 1
+    
+def load_data(): 
+    """
+    Returns
+    -------
+    data : Array
+        All the data
+    labels : Array of string
+        name of features
+    dataframe : Data struct
+        All the data 
+    data_train : Array
+        Data used to create the model
+    data_test : Array
+        Data used to test the model
+    """
+    
+    data=load_obj("data")
+    labels=load_obj("labels")
+    dataframe=load_obj("dataframe")
+    data_train=load_obj("data_train")
+    data_test=load_obj("data_test")
+    return data,labels,dataframe,data_train,data_test
+
+def sample_limite(max_item,features,specie_train):
+    """
+    Parameters
+    ----------
+    max_item : Int
+        Maximum of sample in a class
+    features : Array
+        Contains features
+    specie_train : Array of string
+        Contain species of data used for the train
+    Returns
+    -------
+    specie_train : Array of string
+        Contain species of data used for the train
+    features : Array
+        Contains features
+
+    """
+    compt_detritus = 0
+    compt_artefact = 0
+    lignes = []
+
+    for i in range(0,features.shape[0]):
+        if(specie_train[i] == 'detritus'):
+            if(compt_detritus < max_item):
+                compt_detritus = compt_detritus+1
+            else:
+                lignes.append(i)
+                pass
+                
+        if(specie_train[i] == 'artefact'):
+            if(compt_artefact < max_item):
+                compt_artefact = compt_artefact+1
+            else:
+                lignes.append(i)
+                pass
+                
+    specie_train = np.delete(specie_train,lignes,0)
+    features = np.delete(features,lignes,0)
+    return specie_train,features
+    
+
+def model_creation():
+    pio.renderers.default='jpg'
+    PATH = 'data/ecotaxa'
+    FOLDERS = os.listdir(PATH)
+    
+    #OUR INTERESTED FEATURES:
+    #for ids : "object_id","object_annotation"
+    #numbers :
+    #"object_area","object_major","object_minor","object_circ.","object_feret","object_skew",
+    #"object_kurt,"object_%area","object_area_exc","object_fractal","object_symetrieh",
+    #"object_symetriev,"object_symetriehc","object_symetrievc","object_convperim",
+    #"object_convarea","object_elongation","object_perimferet","object_perimmajor","object_circex",
+    #"object_cdexc",object_kurt_mean","object_skew_mean","object_convarea_area","object_symetrieh_area",
+    #"object_symetriev_area"
+    
+    #labels_to_extract = ["object_area","object_major","object_minor","object_circ.","object_feret","object_skew",
+                         #"object_kurt","object_%area","object_area_exc","object_fractal","object_symetrieh",
+                         #"object_symetriev","object_symetriehc","object_symetrievc","object_convperim",
+                         #"object_convarea","object_elongation","object_perimferet","object_perimmajor","object_circex",
+                         #"object_cdexc","object_kurt_mean","object_skew_mean","object_convarea_area","object_symetrieh_area"]
+    
+    
+    labels_to_extract = ['object_%area',"object_bx",'object_by',"object_area_exc","object_circ.","object_circex","object_elongation",'object_height',
+                         "object_intden","object_major","object_mean","object_minor","object_perim.","object_perimmajor","object_range"]
+    data,labels,dataframe,data_train,data_test = load_data()
+    features = feature_extract(data_train,labels,labels_to_extract)
+    
+    print("= Extracting ID and Specie for the train =")
+    ID_train = data_train[:,labels.index("object_id")]
+    specie_train = data_train[:,labels.index("object_annotation_category")]
+    
+    print("= Extracting ID and Specie for the test =")   
+    ID_test = data_test[:,labels.index("object_id")]
+    specie_test = data_test[:,labels.index("object_annotation_category")]
+    
+    features_test = feature_extract(data_test,labels,labels_to_extract)
+    
+    #remve measures with a nan
+    features_test,ID_test,specie_test = remove_nan(features_test,ID_test,specie_test)
+    features,ID_train,specie_train = remove_nan(features,ID_train,specie_train)
+    
+    #REMOVE DETRITUS AND ARTEFACT
+    #Because we've a large amount of detritus and artefact
+    specie_train,features = sample_limite(1000, features, specie_train)
+    #ACP_ALD(features, labels_to_extract,specie_train) 
+       
+    
+    #critere = "gini"
+    #taux = []
+    # for a in range(1,15):
+    #     profondeur = a
+        
+    #     arbre_base=DecisionTreeClassifier(criterion=critere,max_depth=profondeur,random_state=3)
+    #     clf = arbre_base.fit(features, specie_train)
+    #     # plt.figure(figsize=(12,12))
+    #     predicted = arbre_base.predict(features_test)   
+    #     # tree.plot_tree(clf,feature_names=labels_to_extract,class_names=specie_test,filled=True)    
+    #     # plt.show()
+    #     mc = matrice_confusion(specie_test,predicted)
+    #     # print("MATRICE DE CONFUSION BASE DE TEST")
+    #     # print(mc)
+    #     res = np.sum(np.diag(mc))/np.sum(mc)
+    #     taux.append(int(res*10000)/100)
+    #     # print("taux = "+str(int(res*10000)/100)+"%")
+    #     printProgressBar(a, 15,prefix='Progress:',suffix='Complete',length=50)
+    
+    nb_arbre = 50
+    
+    #Create the collection (Array with all the species involved)
+    collection = label_extract(specie_train)
+    
+    #Model creation and prediction
+    forest = foret_aleatoire("entropy",12,nb_arbre,np.shape(features)[1],features, specie_train, features_test) 
+    
+    #Confusion matrix
+    #mc = matrice_confusion(specie_test,predicted,collection)
+    
+    #Global rate
+    #res = np.sum(np.diag(mc))/np.sum(mc)
+    #Global_rate = int(res*10000)/100
+    
+    
+    # rate = []
+    # for i in range(0,mc.shape[0]):
+    #     rate.append((mc[i][i]/np.sum(mc[:,i]))*100)
+    # class_rate = sum(rate)/len(rate)
+    # print("taux2 = "+str(class_rate)+"%")
+    
+    # values = [collection,rate]
+    
+    save_model(forest)
+
+    
+    return specie_test,features_test
+
+
+def model_prediction(features):
+    forest = load_model()
+    predicted = forest.predict(features)
+    return predicted
+
+        
+    
+    
+def soft(entree):
+    # inpute = load_obj("inpute")
+    # labels = inpute[0][:]
+
+    # features = np.transpose(np.resize(inpute[1],(160,1)))
+    # inter = np.zeros((2,160))
+    # inter = inter.astype(str)
+    # features = features.astype(str)
+    # inter[0,:] = features[0,:]
+    # inter[1,:] = features[0,:]
+    # # for i in range(0,len(inpute[1])):
+    # #     features[0][i] = inpute[1][i]
+        
+
+    labels_to_extract = ["object_area","object_major","object_minor","object_circ.","object_feret","object_skew",
+                         "object_kurt","object_%area","object_area_exc","object_fractal","object_symetrieh",
+                         "object_symetriev","object_symetriehc","object_symetrievc","object_convperim",
+                         "object_convarea","object_elongation","object_perimferet","object_perimmajor","object_circex",
+                         "object_cdexc","object_kurt_mean","object_skew_mean","object_convarea_area","object_symetrieh_area"]
+    
+    # features_extracted = feature_extract(inter,labels,labels_to_extract)
+    # features_extracted = np.delete(features_extracted,1,0)
+    features = np.zeros(len(labels_to_extract))
+    compt = 0
+    try :
+        for elem in labels_to_extract :
+            features[compt] = entree(elem)
+            compt = compt+1
+    except ValueError:
+        features[compt] = 0
+        print("\n"+str(elem) + " is not a valid label, please check")
+    
+    for i in range(0,len(features)):
+        if (str(features[i]) == "nan"):
+            return "nan value"
+    forest = load_model()
+    predicted = forest.predict(features)
+    print("CLASSE : "+str(predicted))
+    
+    return predicted
+        
+
+
+
+
+
+  
+ 
