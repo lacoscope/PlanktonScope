@@ -48,6 +48,14 @@
 #       - status/segmenter/name
 #       - status/segmenter/object_id
 #       - status/segmenter/metric
+#   - status/sensors :  Status of the sensors
+#                       Publish only
+# 
+# - sensors :   This topic adresses the aditionnal sensors
+#   - sensors/measure :      Controls the sensors
+#   - sensors/data      :   Returns sensor data
+#   - sensors/calibration:  Sensors calibration data
+
 
 # TODO Evaluate the opportunity of saving the last x received messages in a queue for treatment
 # We can use collections.deque https://docs.python.org/3/library/collections.html#collections.deque

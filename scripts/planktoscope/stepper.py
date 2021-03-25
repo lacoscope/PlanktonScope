@@ -8,6 +8,7 @@ import planktoscope.mqtt
 import planktoscope.light
 import multiprocessing
 import RPi.GPIO
+import cv2
 
 # Logger library compatible with multiprocessing
 from loguru import logger
@@ -343,6 +344,13 @@ class StepperProcess(multiprocessing.Process):
             # Print status
             logger.info("The focus movement is started.")
             self.focus(direction, distance)
+            
+            
+        elif last_message["action"] == "autofocus":
+            logger.debug("We have received a auto focus command")
+            planktoscope.light.autofocusing()
+            self.autofocus()
+            
         else:
             logger.warning(f"The received message was not understood {last_message}")
 
@@ -363,7 +371,8 @@ class StepperProcess(multiprocessing.Process):
             logger.warning(
                 f"We did not understand the received request {command} - {last_message}"
             )
-
+	
+    
     def focus(self, direction, distance, speed=focus_max_speed):
         """moves the focus stepper
 
@@ -420,12 +429,60 @@ class StepperProcess(multiprocessing.Process):
 
         if direction == "DOWN":
             self.focus_stepper.go(adafruit_motor.stepper.BACKWARD, nb_steps, delay)
-
+        
     # The pump max speed will be at about 400 full steps per second
     # This amounts to 0.9mL per seconds maximum, or 54mL/min
     # NEMA14 pump with 3 rollers is 0.509 mL per round, actual calculation at
     # Stepper is 200 steps/round, or 393steps/ml
     # https://www.wolframalpha.com/input/?i=pi+*+%280.8mm%29%C2%B2+*+54mm+*+3
+            
+    def autofocus(self):
+        logger.debug("Autofocus using CV2 laplacian")
+        i=0
+        flag=0
+        direction=adafruit_motor.stepper.FORWARD
+        nb_steps=500
+        camera=cv2.VideoCapture("http://planktoscope.local:8000/stream.mjpg")
+        ret,frame=camera.read()
+        frame=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
+        old_std=0
+        # std=frame.std()
+        std=cv2.Laplacian(frame, cv2.CV_64F).var()
+        while(i<100):
+            
+            self.focus_stepper.go(direction, nb_steps, 0)
+            
+            a=self.focus_stepper.move()
+            while(not a):
+                a=self.focus_stepper.move()      
+            
+            ret,frame=camera.read()
+            frame=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
+            old_std=std
+            # std=frame.std()
+            std=cv2.Laplacian(frame, cv2.CV_64F).var()
+            
+            logger.debug(f"Old std: {old_std}, std: {std}, direction: {direction}")
+            
+            if(std<old_std):
+                if(8>=flag):
+                    if(adafruit_motor.stepper.FORWARD==direction):
+                        direction=adafruit_motor.stepper.BACKWARD
+                    else:
+                        direction=adafruit_motor.stepper.FORWARD
+
+                    flag+=1
+                    nb_steps=round(nb_steps*0.7)
+                    logger.debug(f"Changement direction focus numero {flag}, nb_steps={nb_steps}")
+                else:
+                    logger.debug(f"Focus atteint")
+                    break
+            i+=1
+        
+        camera.release()
+        cv2.destroyAllWindows()
+
+    
     def pump(self, direction, volume, speed=pump_max_speed):
         """moves the pump stepper
 

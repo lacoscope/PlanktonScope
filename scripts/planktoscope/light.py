@@ -165,6 +165,12 @@ def focusing():
         setRGBEffect(bus, Effect.Water)
         i2c_update()
 
+def autofocusing():
+    with smbus.SMBus(1) as bus:
+        setRGBColor(bus, EffectColor.Purple)
+        setRGBSpeed(bus, 3)
+        setRGBEffect(bus, Effect.Marquee)
+        i2c_update()
 
 def imaging():
     with smbus.SMBus(1) as bus:
