@@ -37,7 +37,7 @@ import planktoscope.integrity
 # Uuid module
 import planktoscope.uuidName
 
-
+import cv2
 ################################################################################
 # Streaming PiCamera over server
 ################################################################################
@@ -168,7 +168,8 @@ class ImagerProcess(multiprocessing.Process):
         self.__img_goal = None
         self.imager_client = None
         self.__error = 0
-
+        
+        
         # Initialise the camera and the process
         # Also starts the streaming to the temporary file
         self.__camera = planktoscope.raspimjpeg.raspimjpeg()
@@ -293,6 +294,28 @@ class ImagerProcess(multiprocessing.Process):
         self.__img_done = 0
 
         self.imager_client.client.publish("status/imager", '{"status":"Started"}')
+
+    def __message_video(self, last_message):
+        logger.info("Lancement enregistrement video")
+        camera=cv2.VideoCapture("http://planktoscope.local:8000/stream.mjpg")
+        fourcc=cv2.VideoWriter_fourcc('M','J','P','G')
+        out=cv2.VideoWriter('/home/pi/output.avi',fourcc,20,(800,592))
+        t=time.perf_counter()
+        while(camera.isOpened()):
+            if(time.perf_counter()-t >= last_message["duree"]):
+                break
+            ret,frame=camera.read()
+            if ret==True:
+                out.write(frame)
+                # cv2.imshow("frame",frame)
+                # if cv2.waitKey(1) & 0xFF == ord('q'):
+                #     break
+            else:
+                break
+        logger.info("Arret enregistrement video")
+        camera.release()
+        out.release()
+        cv2.destroyAllWindows()
 
     def __message_stop(self):
         self.imager_client.client.unsubscribe("status/pump")
@@ -513,6 +536,10 @@ class ImagerProcess(multiprocessing.Process):
 
         elif action == "stop":
             self.__message_stop()
+            
+        elif action == "video":
+            logger.info("Action = video")
+            self.__message_video(last_message)
 
         elif action == "update_config":
             self.__message_update(last_message)
@@ -520,7 +547,7 @@ class ImagerProcess(multiprocessing.Process):
         elif action == "settings":
             self.__message_settings(last_message)
 
-        elif action not in ["image", "stop", "update_config", "settings", ""]:
+        elif action not in ["image", "stop","video", "update_config", "settings", ""]:
             logger.warning(
                 f"We did not understand the received request {action} - {last_message}"
             )
@@ -553,10 +580,10 @@ class ImagerProcess(multiprocessing.Process):
             "acq_camera_resolution": f"{self.__resolution[0]}x{self.__resolution[1]}",
             "acq_camera_iso": self.__iso,
             "acq_camera_shutter_speed": self.__shutter_speed,
-            "acq_uuid": planktoscope.uuidName.uuidMachine(
+            "acq_uuid": planktoscope.uuidName.uuidMachineName(
                 machine=planktoscope.uuidName.getSerial()
             ),
-            "sample_uuid": planktoscope.uuidName.uuidMachine(
+            "sample_uuid": planktoscope.uuidName.uuidMachineName(
                 machine=planktoscope.uuidName.getSerial()
             ),
         }
