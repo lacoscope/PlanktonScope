@@ -1,4 +1,5 @@
 # Logger library compatible with multiprocessing
+
 from loguru import logger
 import sys
 
@@ -40,6 +41,9 @@ logger.info("Starting the PlanktoScope python script!")
 
 # Library for exchaning messages with Node-RED
 import planktoscope.mqtt
+
+# Import the planktonscope sensors module
+import planktoscope.sensors
 
 # Import the planktonscope stepper module
 import planktoscope.stepper
@@ -113,28 +117,26 @@ if __name__ == "__main__":
     # Prepare the event for a gracefull shutdown
     shutdown_event = multiprocessing.Event()
     shutdown_event.clear()
-
+    
+    # Starts the sensors process for actuators
+    logger.info("Starting the sensors control process (step 2/5)")
+    sensors_thread = planktoscope.sensors.SensorsProcess(shutdown_event)
+    sensors_thread.start()
+    
     # Starts the stepper process for actuators
-    logger.info("Starting the stepper control process (step 2/4)")
+    logger.info("Starting the stepper control process (step 3/5)")
     stepper_thread = planktoscope.stepper.StepperProcess(shutdown_event)
     stepper_thread.start()
 
     # Starts the imager control process
-    logger.info("Starting the imager control process (step 3/4)")
+    logger.info("Starting the imager control process (step 4/5)")
     imager_thread = planktoscope.imager.ImagerProcess(shutdown_event)
     imager_thread.start()
 
     # Starts the segmenter process
-    logger.info("Starting the segmenter control process (step 4/4)")
+    logger.info("Starting the segmenter control process (step 5/5)")
     segmenter_thread = planktoscope.segmenter.SegmenterProcess(shutdown_event)
     segmenter_thread.start()
-
-
-    # Starts the module process
-    # Uncomment here as needed
-    # logger.info("Starting the module process")
-    # module_thread = planktoscope.module.ModuleProcess(shutdown_event)
-    # module_thread.start()
 
     logger.info("Starting the display module")
     display = planktoscope.display.Display()
@@ -148,6 +150,9 @@ if __name__ == "__main__":
         if not stepper_thread.is_alive():
             logger.error("The stepper process died unexpectedly! Oh no!")
             break
+        if not sensors_thread.is_alive():
+            logger.error("The sensors process died unexpectedly! Oh no!")
+            break
         if not imager_thread.is_alive():
             logger.error("The imager process died unexpectedly! Oh no!")
             break
@@ -159,15 +164,14 @@ if __name__ == "__main__":
     logger.info("Shutting down the shop")
     shutdown_event.set()
     time.sleep(1)
+    sensors_thread.join()
     stepper_thread.join()
     imager_thread.join()
     segmenter_thread.join()
-    # Uncomment this for clean shutdown
-    # module_thread.join()
+    
+    sensors_thread.close()
     stepper_thread.close()
     imager_thread.close()
     segmenter_thread.close()
-    # Uncomment this for clean shutdown
-    # module_thread.close()
     display.stop()
     logger.info("Bye")
